@@ -4,6 +4,7 @@
 
 - command: make build & make run 
 - NOTE: need to run docker first
+- port: 8000 
 
 ### Endpoints
 
