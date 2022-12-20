@@ -3,18 +3,22 @@ package services
 import (
 	"XTechProject/cmd/config"
 	"XTechProject/internal/models"
-	"bytes"
 	"encoding/json"
-	"encoding/xml"
+	"errors"
 	"fmt"
-	uuid "github.com/satori/go.uuid"
-	"golang.org/x/net/html/charset"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+)
+
+var (
+	ErrUSDNotFound             = errors.New("USD not found")
+	ErrEmptyValuteSlice        = errors.New("empty valutes slice")
+	ErrUnexpectedType          = errors.New("unexpected type for order_by")
+	ErrAlreadyUpdatedFiatToday = errors.New("fiat currencies were already updated today")
 )
 
 type (
@@ -50,7 +54,7 @@ func (svc *ManagementService) runWorkers() {
 	go svc.BTCWorker()
 	// fiat will not created if it was already created today
 	go svc.FiatWorker()
-	// tickers will push workers
+	// tickers will trigger workers
 	tickerForBTC := time.NewTicker(time.Second * 10).C
 	tickerForFiat := time.NewTicker(time.Hour * 24).C
 	for {
@@ -64,13 +68,11 @@ func (svc *ManagementService) runWorkers() {
 }
 
 func getResponse(link string) (*http.Response, error) {
-	// NOTE: need to close resp -> resp.Body.Close()
-
+	// NOTE: need to close resp
 	resp, err := http.Get(link)
 	if err != nil {
 		return nil, fmt.Errorf("http.Get() err: %w", err)
 	}
-
 	// Success is indicated with 2xx status codes:
 	statusOK := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if !statusOK {
@@ -80,18 +82,28 @@ func getResponse(link string) (*http.Response, error) {
 }
 
 func serializeFiatCurrenciesData(val []Valute) ([]byte, float64, error) {
+	if len(val) == 0 {
+		return nil, 0, ErrEmptyValuteSlice
+	}
 	var (
 		mu     = &sync.Mutex{}
-		wg     sync.WaitGroup
 		usdrub float64
 	)
+	errCh := make(chan error)
+	defer close(errCh)
 	cur := make([]models.Currency, 0, len(val))
 	for _, v := range val {
-		wg.Add(1)
 		go func(valute Valute) {
-			defer wg.Done()
-			nominal, _ := strconv.Atoi(valute.Nominal)
-			value, _ := strconv.ParseFloat(strings.Replace(valute.Value, ",", ".", 1), 64)
+			nominal, err := strconv.Atoi(valute.Nominal)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			value, err := strconv.ParseFloat(strings.Replace(valute.Value, ",", ".", 1), 64)
+			if err != nil {
+				errCh <- err
+				return
+			}
 			if valute.CharCode == models.CharCodeUSD {
 				usdrub = value
 			}
@@ -105,116 +117,103 @@ func serializeFiatCurrenciesData(val []Valute) ([]byte, float64, error) {
 				Val:      value,
 			})
 			mu.Unlock()
+			if len(cur) == len(val) {
+				errCh <- nil
+			}
 		}(v)
 	}
-	wg.Wait()
+	if err := <-errCh; err != nil {
+		return nil, 0, err
+	}
+	if usdrub == 0 {
+		return nil, 0, ErrUSDNotFound
+	}
 	bts, err := json.Marshal(cur)
 	if err != nil {
-		log.Println(err)
+		return nil, 0, err
 	}
 	return bts, usdrub, nil
 }
 
-func serializeOrderBy(orderBy string) string {
+func serializeOrderBy(orderBy string) (string, error) {
 	if orderBy != "" {
-		if string(orderBy[0]) == "-" {
-			orderBy = orderBy[1:] + " DESC"
+		switch orderBy {
+		case "value", "created_at", "latest":
+			orderBy = "ORDER BY " + orderBy
+		case "-value", "-created_at", "-latest":
+			orderBy = "ORDER BY " + orderBy[1:] + " DESC"
+		default:
+			return "", ErrUnexpectedType
 		}
-		orderBy = "ORDER BY " + orderBy
 	}
-	return orderBy
+	return orderBy, nil
 }
 
 func (svc *ManagementService) updateBTCInDB(unixTime int64, lastValue string) {
 	if err := svc.db.UpdateLastRecordForBTC(); err != nil {
-		log.Printf("error with update last record for btc, err %s\n", err)
+		log.Printf("BTCWorker: error in UpdateLastRecordForBTC, err %s\n", err)
 		return
 	}
 	tm := time.Unix(0, unixTime*int64(time.Millisecond))
 	value, err := strconv.ParseFloat(lastValue, 64)
 	if err != nil {
-		log.Printf("error with parse float, err %s\n", err)
+		log.Printf("BTCWorker: error in ParseFloat, err %s\n", err)
 		return
 	}
 	btc := &models.BTC{
-		ID:        uuid.NewV4().String(),
 		Value:     value,
 		CreatedAt: &tm,
 		Latest:    true,
 	}
 	btcToFiat, err := svc.GetBTCToFiat(btc)
 	if err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in GetBTCToFiat, err %s\n", err)
 		return
 	}
 	btc.CurrenciesToBTC, err = json.Marshal(btcToFiat)
 	if err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in json.Marshal, err %s\n", err)
 		return
 	}
 	if err = svc.db.CreateBTCRecord(btc); err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in CreateBTCRecord, err %s\n", err)
 		return
 	}
 	log.Println("BTC/USDT and BTC/Fiat updated in db")
 }
 
-func (svc *ManagementService) updateFiatInDB(data []byte) {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
-	decoder.CharsetReader = charset.NewReaderLabel
-	var val ValCurs
-	if err := decoder.Decode(&val); err != nil {
-		log.Printf("error with decoding body, err: %s\n", err.Error())
-		return
-	}
-	currencies, usdrub, err := serializeFiatCurrenciesData(val.Valutes)
-	model := &models.Fiat{
-		ID:     uuid.NewV4().String(),
-		Latest: true,
-		USDRUB: usdrub,
-	}
-	json.Unmarshal(currencies, &model.Currencies)
+func (svc *ManagementService) checkLastDateUpdatingFiatCurrencies() error {
 	date, err := svc.db.GetLastDateForFiat()
 	if err != nil {
-		log.Printf("error with decoding body, err: %s\n", err.Error())
-		return
+		return fmt.Errorf("error in GetLastDateForFiaty, err: %s\n", err.Error())
 	}
 	if date != nil {
 		// if we already have data today -> skip
 		d := date.Format(time.RFC3339[:10])
 		t := time.Now().Format(time.RFC3339[:10])
 		if d == t {
-			log.Println("already have data for fiat today")
-			return
+			return ErrAlreadyUpdatedFiatToday
 		}
 	}
-	// if there is no data today -> create a new one
-	// set old data as latest=false
-	if err := svc.db.SetAllRecordsFiatLatestFalse(); err != nil {
-		log.Printf("error with set latest false for all fiat records, err: %s\n", err.Error())
-		return
-	}
-	// create a new record for fiat currencies
-	if err = svc.db.CreateFiatRecord(model); err != nil {
-		log.Printf("error with creating fiat record, err: %s\n", err.Error())
-		return
-	}
-	log.Println("Fiat updated in db")
+	return nil
 }
 
 func (svc *ManagementService) GetLastBTC() (*models.BTC, error) {
 	model, err := svc.db.GetLastBTC()
 	if err != nil {
-		return nil, fmt.Errorf("error to get last btcusdt, err: %s\n", err.Error())
+		return nil, fmt.Errorf("error in GetLastBTC: %w", err)
 	}
 	return model, nil
 }
 
 func (svc *ManagementService) GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error) {
-	orderBy = serializeOrderBy(orderBy)
+	orderBy, err := serializeOrderBy(orderBy)
+	if err != nil {
+		return nil, fmt.Errorf("error in serializeOrderBy: %w", err)
+	}
 	modelsData, err := svc.db.GetAllBTC(limit, offset, orderBy)
 	if err != nil {
-		return nil, fmt.Errorf("error to get all btcusdt data, err: %s\n", err.Error())
+		return nil, fmt.Errorf("error to get all btcusdt data, err: %w", err)
 	}
 	return modelsData, nil
 }
@@ -222,16 +221,19 @@ func (svc *ManagementService) GetAllBTC(limit, offset int, orderBy string) ([]mo
 func (svc *ManagementService) GetLastFiat() (*models.Fiat, error) {
 	model, err := svc.db.GetLastFiat()
 	if err != nil {
-		return nil, fmt.Errorf("error to get last fiat, err: %s\n", err.Error())
+		return nil, fmt.Errorf("error in GetLastFiat: %w", err)
 	}
 	return model, nil
 }
 
 func (svc *ManagementService) GetFiatHistory(limit, offset int, orderBy string) ([]models.Fiat, error) {
-	orderBy = serializeOrderBy(orderBy)
+	orderBy, err := serializeOrderBy(orderBy)
+	if err != nil {
+		return nil, fmt.Errorf("error in serializeOrderBy: %w", err)
+	}
 	modelsData, err := svc.db.GetAllFiat(limit, offset, orderBy)
 	if err != nil {
-		return nil, fmt.Errorf("error to get all fiat history, err: %s\n", err.Error())
+		return nil, fmt.Errorf("error in GetAllFiat: %w", err)
 	}
 	return modelsData, nil
 }
@@ -239,11 +241,14 @@ func (svc *ManagementService) GetFiatHistory(limit, offset int, orderBy string) 
 func (svc *ManagementService) GetBTCToFiat(btc *models.BTC) (*map[string]float64, error) {
 	lastFiat, err := svc.db.GetLastFiat()
 	if err != nil {
-		return nil, fmt.Errorf("error to get last fiat, err: %s\n", err.Error())
+		return nil, fmt.Errorf("error in GetLastFiat: %w", err)
 	}
 	btcToFiat := make(map[string]float64, 34)
 	var currencies []models.Currency
-	json.Unmarshal(lastFiat.Currencies, &currencies)
+	err = json.Unmarshal(lastFiat.Currencies, &currencies)
+	if err != nil {
+		return nil, fmt.Errorf("error in json.Unmarshal: %w", err)
+	}
 	for _, c := range currencies {
 		btcToFiat[c.CharCode] = btc.Value * lastFiat.USDRUB / c.Val * float64(c.Nominal)
 	}

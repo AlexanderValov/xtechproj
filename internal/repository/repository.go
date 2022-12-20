@@ -20,38 +20,29 @@ func New(driver *postgres.Postgres) *Repository {
 }
 
 func (r *Repository) CreateTablesIfTheyNotExist() {
-	f, err := r.driver.DB.Query(`SELECT * FROM fiat`)
-	if err != nil {
-		r.driver.DB.Exec(`CREATE TABLE fiat
-		(
-			id         uuid                     not null primary key,
-			currencies jsonb                    not null,
-			usdrub     decimal(8, 4)            not null,
-			created_at timestamp with time zone not null,
-			latest     boolean                  not null
-		);`)
-	} else {
-		_ = f.Close()
-	}
-	b, err := r.driver.DB.Query(`SELECT * FROM bitcoin`)
-	if err != nil {
-		r.driver.DB.Exec(`CREATE TABLE bitcoin
-		(
-			id                uuid                     not null primary key,
-			value             decimal(12, 1)           not null,
-			created_at 		  timestamp with time zone not null,
-			latest            boolean                  not null,
-			currencies_to_btc jsonb                    not null
-		);`)
-	} else {
-		_ = b.Close()
-	}
+	r.driver.DB.Exec(`CREATE TABLE if not exists fiat
+	(
+		id         bigserial              	primary key,
+		currencies jsonb                    not null,
+		usdrub     decimal(8, 4)            not null,
+		created_at timestamp with time zone not null,
+		latest     boolean                  not null
+	);`)
+	r.driver.DB.Exec(`CREATE TABLE if not exists bitcoin
+	(
+		id                bigserial                primary key,
+		value             decimal(12, 1)           not null,
+		created_at 		  timestamp with time zone not null,
+		latest            boolean                  not null,
+		currencies_to_btc jsonb                    not null
+	);`)
+
 }
 
 func (r *Repository) CreateBTCRecord(model *models.BTC) error {
 	query := `
-	INSERT INTO bitcoin (id, value, created_at, latest, currencies_to_btc) 
-	VALUES (:id, :value, :created_at, :latest, :currencies_to_btc)`
+	INSERT INTO bitcoin (value, created_at, latest, currencies_to_btc) 
+	VALUES (:value, :created_at, :latest, :currencies_to_btc)`
 	_, err := r.driver.DB.NamedExec(query, model)
 	return err
 }
@@ -64,9 +55,9 @@ func (r *Repository) UpdateLastRecordForBTC() error {
 
 func (r *Repository) CreateFiatRecord(model *models.Fiat) error {
 	query := `
-	INSERT INTO fiat (id, currencies, latest, created_at, usdrub)
-	VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
-	_, err := r.driver.DB.Exec(query, model.ID, model.Currencies, model.Latest, model.USDRUB)
+	INSERT INTO fiat (currencies, latest, usdrub, created_at)
+	VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
+	_, err := r.driver.DB.Exec(query, model.Currencies, model.Latest, model.USDRUB)
 	return err
 }
 

@@ -13,7 +13,7 @@ func main() {
 	// init config
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("error with starting postgres, err: %s", err.Error())
+		log.Fatalf("error with creating config, err: %s", err.Error())
 	}
 	// init postgres
 	db, err := postgres.NewPostgresDB(cfg.DB.URL)

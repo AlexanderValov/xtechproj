@@ -1,8 +1,11 @@
 package services
 
 import (
+	"XTechProject/internal/models"
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
+	"golang.org/x/net/html/charset"
 	"io"
 	"io/ioutil"
 	"log"
@@ -36,21 +39,23 @@ func (svc *ManagementService) BTCWorker() {
 	log.Println("BTCWorker triggered")
 	response, err := getResponse(svc.cfg.URLs.BTCUSDT)
 	if err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in getResponse, err: %s", err.Error())
+		return
 	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in io.ReadAll, err: %s", err.Error())
+		return
 	}
 	go response.Body.Close()
 	var r *BTCUSDTResponse
 	if err := json.Unmarshal(body, &r); err != nil {
-		log.Println(err)
+		log.Printf("BTCWorker: error in json.Unmarshal, err: %s", err.Error())
 	}
 	if lastPrice != r.Data.Last {
+		lastPrice = r.Data.Last
 		// create new record
 		go svc.updateBTCInDB(r.Data.Time, r.Data.Last)
-		lastPrice = r.Data.Last
 	}
 }
 
@@ -73,14 +78,47 @@ type (
 
 func (svc *ManagementService) FiatWorker() {
 	log.Println("FiatWorker triggered")
+	// if there is data today -> stop
+	if err := svc.checkLastDateUpdatingFiatCurrencies(); err != nil {
+		log.Printf("FiatWorker: error in checkLastDateUpdatingFiatCurrencies: %s", err.Error())
+		return
+	}
 	response, err := getResponse(svc.cfg.URLs.Fiat)
 	if err != nil {
-		log.Printf("error with getting response from %s, err: %s\n", svc.cfg.URLs.Fiat, err.Error())
+		log.Printf("FiatWorker: error in getResponse from %s, err: %s\n", svc.cfg.URLs.Fiat, err.Error())
+		return
 	}
+	defer response.Body.Close()
 	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		log.Printf("error with reading response, err: %s\n", err.Error())
+		log.Printf("FiatWorker: error in ioutil.ReadAll, err: %s\n", err.Error())
+		return
 	}
-	go svc.updateFiatInDB(data)
-	go response.Body.Close()
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.CharsetReader = charset.NewReaderLabel
+	var val ValCurs
+	if err := decoder.Decode(&val); err != nil {
+		log.Printf("FiatWorker: error in decoder.Decode, err: %s\n", err.Error())
+		return
+	}
+	currencies, usdrub, err := serializeFiatCurrenciesData(val.Valutes)
+	model := &models.Fiat{
+		Latest: true,
+		USDRUB: usdrub,
+	}
+	if err = json.Unmarshal(currencies, &model.Currencies); err != nil {
+		log.Printf("FiatWorker: error in json.Unmarshal, err: %s\n", err.Error())
+		return
+	}
+	// set old data as latest=false
+	if err := svc.db.SetAllRecordsFiatLatestFalse(); err != nil {
+		log.Printf("FiatWorker: error in SetAllRecordsFiatLatestFalse, err: %s\n", err.Error())
+		return
+	}
+	// create a new record for fiat currencies
+	if err = svc.db.CreateFiatRecord(model); err != nil {
+		log.Printf("FiatWorker:error in CreateFiatRecord, err: %s\n", err.Error())
+		return
+	}
+	log.Println("Fiat updated in db")
 }

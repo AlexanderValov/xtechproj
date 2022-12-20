@@ -9,7 +9,7 @@ const CharCodeUSD = "USD"
 
 type (
 	Fiat struct {
-		ID         string          `json:"id"  db:"id"`
+		ID         int             `json:"id"  db:"id"`
 		Latest     bool            `json:"latest" db:"latest"`
 		CreatedAt  *time.Time      `json:"created_at" db:"created_at"`
 		USDRUB     float64         `json:"usdrub" db:"usdrub"`

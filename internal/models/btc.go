@@ -6,7 +6,7 @@ import (
 )
 
 type BTC struct {
-	ID              string          `json:"id"  db:"id"`
+	ID              int             `json:"id"  db:"id"`
 	Value           float64         `json:"value" db:"value"`
 	Latest          bool            `json:"latest" db:"latest"`
 	CreatedAt       *time.Time      `json:"created_at" db:"created_at"`
