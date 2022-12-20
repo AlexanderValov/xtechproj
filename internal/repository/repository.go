@@ -19,6 +19,19 @@ func New(driver *postgres.Postgres) *Repository {
 	return r
 }
 
+type Repositorier interface {
+	CreateBTCRecord(model *models.BTC) error
+	UpdateLastRecordForBTC() error
+	GetLastBTC() (*models.BTC, error)
+	GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error)
+
+	GetLastFiat() (*models.Fiat, error)
+	GetAllFiat(limit, offset int, orderBy string) ([]models.Fiat, error)
+	CreateFiatRecord(model *models.Fiat) error
+	SetAllRecordsFiatLatestFalse() error
+	GetLastDateForFiat() (*time.Time, error)
+}
+
 func (r *Repository) CreateTablesIfTheyNotExist() {
 	r.driver.DB.Exec(`CREATE TABLE if not exists fiat
 	(

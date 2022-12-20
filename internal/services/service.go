@@ -3,6 +3,7 @@ package services
 import (
 	"XTechProject/cmd/config"
 	"XTechProject/internal/models"
+	"XTechProject/internal/repository"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,28 +23,24 @@ var (
 )
 
 type (
-	repositorier interface {
-		CreateBTCRecord(model *models.BTC) error
-		UpdateLastRecordForBTC() error
+	ManagementService struct {
+		db  repository.Repositorier
+		cfg *config.Config
+	}
+	Servicer interface {
 		GetLastBTC() (*models.BTC, error)
 		GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error)
+		UpdateBTCInDB(unixTime int64, lastValue string) error
+		GetBTCToFiat(btc *models.BTC) (*map[string]float64, error)
 
 		GetLastFiat() (*models.Fiat, error)
-		GetAllFiat(limit, offset int, orderBy string) ([]models.Fiat, error)
-		CreateFiatRecord(model *models.Fiat) error
-		SetAllRecordsFiatLatestFalse() error
-		GetLastDateForFiat() (*time.Time, error)
-	}
-
-	ManagementService struct {
-		db  repositorier
-		cfg *config.Config
+		GetFiatHistory(limit, offset int, orderBy string) ([]models.Fiat, error)
+		CheckLastDateUpdatingFiatCurrencies() error
 	}
 )
 
-func NewManagementService(db repositorier, cfg *config.Config) *ManagementService {
+func NewManagementService(db repository.Repositorier, cfg *config.Config) *ManagementService {
 	svc := &ManagementService{db: db, cfg: cfg}
-
 	// run workers
 	go svc.runWorkers()
 	return svc
@@ -149,16 +146,16 @@ func serializeOrderBy(orderBy string) (string, error) {
 	return orderBy, nil
 }
 
-func (svc *ManagementService) updateBTCInDB(unixTime int64, lastValue string) {
+func (svc *ManagementService) UpdateBTCInDB(unixTime int64, lastValue string) error {
 	if err := svc.db.UpdateLastRecordForBTC(); err != nil {
 		log.Printf("BTCWorker: error in UpdateLastRecordForBTC, err %s\n", err)
-		return
+		return err
 	}
 	tm := time.Unix(0, unixTime*int64(time.Millisecond))
 	value, err := strconv.ParseFloat(lastValue, 64)
 	if err != nil {
 		log.Printf("BTCWorker: error in ParseFloat, err %s\n", err)
-		return
+		return err
 	}
 	btc := &models.BTC{
 		Value:     value,
@@ -168,21 +165,22 @@ func (svc *ManagementService) updateBTCInDB(unixTime int64, lastValue string) {
 	btcToFiat, err := svc.GetBTCToFiat(btc)
 	if err != nil {
 		log.Printf("BTCWorker: error in GetBTCToFiat, err %s\n", err)
-		return
+		return err
 	}
 	btc.CurrenciesToBTC, err = json.Marshal(btcToFiat)
 	if err != nil {
 		log.Printf("BTCWorker: error in json.Marshal, err %s\n", err)
-		return
+		return err
 	}
 	if err = svc.db.CreateBTCRecord(btc); err != nil {
 		log.Printf("BTCWorker: error in CreateBTCRecord, err %s\n", err)
-		return
+		return err
 	}
 	log.Println("BTC/USDT and BTC/Fiat updated in db")
+	return nil
 }
 
-func (svc *ManagementService) checkLastDateUpdatingFiatCurrencies() error {
+func (svc *ManagementService) CheckLastDateUpdatingFiatCurrencies() error {
 	date, err := svc.db.GetLastDateForFiat()
 	if err != nil {
 		return fmt.Errorf("error in GetLastDateForFiaty, err: %s\n", err.Error())

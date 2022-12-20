@@ -1,25 +1,16 @@
 package server
 
 import (
-	"XTechProject/internal/models"
 	"XTechProject/internal/services"
 	"github.com/gorilla/mux"
 	"net/http"
 	"time"
 )
 
-type Servicer interface {
-	GetLastBTC() (*models.BTC, error)
-	GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error)
-
-	GetLastFiat() (*models.Fiat, error)
-	GetFiatHistory(limit, offset int, orderBy string) ([]models.Fiat, error)
-}
-
 type (
 	Server struct {
 		*http.Server
-		service Servicer
+		service services.Servicer
 	}
 	Filter struct {
 		Offset  int    `schema:"offset"`

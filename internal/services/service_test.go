@@ -2,7 +2,9 @@ package services
 
 import (
 	"XTechProject/internal/models"
+	mockServices "XTechProject/internal/services/mocks"
 	"encoding/json"
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"strconv"
 	"testing"
@@ -187,4 +189,15 @@ func TestSerializeOrderByError(t *testing.T) {
 	ans, err := serializeOrderBy("wrong_order_by")
 	require.Error(t, err)
 	require.Equal(t, "", ans)
+}
+
+func TestUpdateBTCInDB(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	srv := mockServices.NewMockServicer(ctl)
+	unixTime := int64(1671542754)
+	lastValue := "666.6"
+	srv.EXPECT().UpdateBTCInDB(unixTime, lastValue)
+	err := srv.UpdateBTCInDB(unixTime, lastValue)
+	require.NoError(t, err)
 }

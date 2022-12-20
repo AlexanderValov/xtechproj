@@ -55,7 +55,7 @@ func (svc *ManagementService) BTCWorker() {
 	if lastPrice != r.Data.Last {
 		lastPrice = r.Data.Last
 		// create new record
-		go svc.updateBTCInDB(r.Data.Time, r.Data.Last)
+		go svc.UpdateBTCInDB(r.Data.Time, r.Data.Last)
 	}
 }
 
@@ -79,7 +79,7 @@ type (
 func (svc *ManagementService) FiatWorker() {
 	log.Println("FiatWorker triggered")
 	// if there is data today -> stop
-	if err := svc.checkLastDateUpdatingFiatCurrencies(); err != nil {
+	if err := svc.CheckLastDateUpdatingFiatCurrencies(); err != nil {
 		log.Printf("FiatWorker: error in checkLastDateUpdatingFiatCurrencies: %s", err.Error())
 		return
 	}
