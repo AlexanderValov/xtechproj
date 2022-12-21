@@ -152,6 +152,20 @@ func (mr *MockRepositorierMockRecorder) SetAllRecordsFiatLatestFalse() *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetAllRecordsFiatLatestFalse", reflect.TypeOf((*MockRepositorier)(nil).SetAllRecordsFiatLatestFalse))
 }
 
+// UpdateFiatForLastBTC mocks base method.
+func (m *MockRepositorier) UpdateFiatForLastBTC(model *models.BTC) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateFiatForLastBTC", model)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateFiatForLastBTC indicates an expected call of UpdateFiatForLastBTC.
+func (mr *MockRepositorierMockRecorder) UpdateFiatForLastBTC(model interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateFiatForLastBTC", reflect.TypeOf((*MockRepositorier)(nil).UpdateFiatForLastBTC), model)
+}
+
 // UpdateLastRecordForBTC mocks base method.
 func (m *MockRepositorier) UpdateLastRecordForBTC() error {
 	m.ctrl.T.Helper()

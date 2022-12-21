@@ -31,7 +31,6 @@ type (
 	Servicer interface {
 		GetLastBTC() (*models.BTC, error)
 		GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error)
-		UpdateBTCInDB(unixTime int64, lastValue string) error
 		GetBTCToFiat(btc *models.BTC) (*map[string]float64, error)
 
 		GetLastFiat() (*models.Fiat, error)
@@ -63,11 +62,12 @@ func (svc *ManagementService) RunWorkers() {
 	}
 }
 
-func calculateBTCToFiat(currencies []models.Currency, btc, usdRub float64) (map[string]float64, error) {
+func calculateBTCToFiat(currencies []models.Currency, btcInRub float64) (map[string]float64, error) {
 	btcToFiat := make(map[string]float64, 34)
 	for _, c := range currencies {
-		btcToFiat[c.CharCode] = btc * usdRub / c.Val * float64(c.Nominal)
+		btcToFiat[c.CharCode] = btcInRub / c.Val * float64(c.Nominal)
 	}
+	btcToFiat["RUB"] = btcInRub
 	return btcToFiat, nil
 }
 
@@ -155,36 +155,41 @@ func unixTimeToTime(unixTime int64) *time.Time {
 	return &tm
 }
 
-func (svc *ManagementService) UpdateBTCInDB(unixTime int64, lastValue string) error {
+func (svc *ManagementService) UpdateBTCInDB(unixTime int64, lastValue string) {
 	if err := svc.db.UpdateLastRecordForBTC(); err != nil {
 		log.Printf("BTCWorker: error in UpdateLastRecordForBTC, err %s\n", err)
-		return err
 	}
-	value, err := strconv.ParseFloat(lastValue, 64)
+	inUSDT, err := strconv.ParseFloat(lastValue, 64)
 	if err != nil {
-		log.Printf("BTCWorker: error in ParseFloat, err %s\n", err)
-		return err
+		log.Printf("BTCWorker: error in ParseFloat(lastValue, 64), err %s\n", err)
 	}
 	btc := &models.BTC{
-		Value:     value,
+		InUSDT:    inUSDT,
 		CreatedAt: unixTimeToTime(unixTime),
 		Latest:    true,
 	}
+	if err = svc.db.CreateBTCRecord(btc); err != nil {
+		log.Printf("BTCWorker: error in CreateBTCRecord, err %s\n", err)
+	}
+	log.Println("BTC updated in db")
+	if err := svc.UpdateBTCToFiatInDB(btc); err != nil {
+		log.Printf("BTCWorker: error in UpdateBTCToFiatInDB, err %s\n", err)
+	}
+}
+
+func (svc *ManagementService) UpdateBTCToFiatInDB(btc *models.BTC) error {
 	btcToFiat, err := svc.GetBTCToFiat(btc)
 	if err != nil {
-		log.Printf("BTCWorker: error in GetBTCToFiat, err %s\n", err)
-		return err
+		return fmt.Errorf("error in GetBTCToFiat(btc), err: %w", err)
 	}
 	btc.BTCToFiat, err = json.Marshal(btcToFiat)
 	if err != nil {
-		log.Printf("BTCWorker: error in json.Marshal, err %s\n", err)
-		return err
+		return fmt.Errorf("error in json.Marshal(btcToFiat), err: %w", err)
 	}
-	if err = svc.db.CreateBTCRecord(btc); err != nil {
-		log.Printf("BTCWorker: error in CreateBTCRecord, err %s\n", err)
-		return err
+	if err = svc.db.UpdateFiatForLastBTC(btc); err != nil {
+		return fmt.Errorf("error in UpdateFiatForLastBTC(btc), err: %w", err)
 	}
-	log.Println("BTC/USDT and BTC/Fiat updated in db")
+	log.Println("BTC/Fiat updated in db")
 	return nil
 }
 
@@ -197,7 +202,8 @@ func (svc *ManagementService) GetBTCToFiat(btc *models.BTC) (*map[string]float64
 	if err := json.Unmarshal(lastFiat.Currencies, &currencies); err != nil {
 		return nil, fmt.Errorf("error in json.Unmarshal: %w", err)
 	}
-	btcToFiat, err := calculateBTCToFiat(currencies, btc.Value, lastFiat.USDRUB)
+	btc.InRub = btc.InUSDT * lastFiat.USDRUB
+	btcToFiat, err := calculateBTCToFiat(currencies, btc.InRub)
 	if err != nil {
 		return nil, err
 	}

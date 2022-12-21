@@ -12,7 +12,7 @@ type (
 		ID         int             `json:"id"  db:"id"`
 		Latest     bool            `json:"latest" db:"latest"`
 		CreatedAt  *time.Time      `json:"created_at" db:"created_at"`
-		USDRUB     float64         `json:"usdrub" db:"usdrub"`
+		USDRUB     float64         `json:"usd_rub" db:"usd_rub"`
 		Currencies json.RawMessage `json:"currencies" db:"currencies"`
 	}
 	Currency struct {

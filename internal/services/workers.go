@@ -47,7 +47,11 @@ func (svc *ManagementService) BTCWorker() {
 		log.Printf("BTCWorker: error in io.ReadAll, err: %s", err.Error())
 		return
 	}
-	go response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Printf("error in response.Body.Close(), err: %s", err.Error())
+		}
+	}()
 	var r *BTCUSDTResponse
 	if err := json.Unmarshal(body, &r); err != nil {
 		log.Printf("BTCWorker: error in json.Unmarshal, err: %s", err.Error())
@@ -88,7 +92,11 @@ func (svc *ManagementService) FiatWorker() {
 		log.Printf("FiatWorker: error in getResponse from %s, err: %s\n", svc.cfg.URLs.Fiat, err.Error())
 		return
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Printf("error in response.Body.Close(), err: %s", err.Error())
+		}
+	}()
 	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		log.Printf("FiatWorker: error in ioutil.ReadAll, err: %s\n", err.Error())

@@ -24,6 +24,7 @@ type Repositorier interface {
 	UpdateLastRecordForBTC() error
 	GetLastBTC() (*models.BTC, error)
 	GetAllBTC(limit, offset int, orderBy string) ([]models.BTC, error)
+	UpdateFiatForLastBTC(model *models.BTC) error
 
 	GetLastFiat() (*models.Fiat, error)
 	GetAllFiat(limit, offset int, orderBy string) ([]models.Fiat, error)
@@ -37,25 +38,31 @@ func (r *Repository) CreateTablesIfTheyNotExist() {
 	(
 		id         bigserial              	primary key,
 		currencies jsonb                    not null,
-		usdrub     decimal(8, 4)            not null,
+		usd_rub    decimal(8, 4)            not null,
 		created_at timestamp with time zone not null,
 		latest     boolean                  not null
 	);`)
 	r.driver.DB.Exec(`CREATE TABLE if not exists bitcoin
 	(
 		id                bigserial                primary key,
-		value             decimal(12, 1)           not null,
 		created_at 		  timestamp with time zone not null,
+		in_usdt           decimal(10, 1)           not null,
+		in_rub            decimal(12, 5)           not null,
 		latest            boolean                  not null,
-		btc_to_fiat       jsonb                    not null
+		btc_to_fiat       jsonb                    
 	);`)
-
 }
 
 func (r *Repository) CreateBTCRecord(model *models.BTC) error {
 	query := `
-	INSERT INTO bitcoin (value, created_at, latest, btc_to_fiat) 
-	VALUES (:value, :created_at, :latest, :btc_to_fiat)`
+	INSERT INTO bitcoin (in_usdt, created_at, latest, in_rub, btc_to_fiat) 
+	VALUES (:in_usdt, :created_at, :latest, :in_rub, :btc_to_fiat)`
+	_, err := r.driver.DB.NamedExec(query, model)
+	return err
+}
+
+func (r *Repository) UpdateFiatForLastBTC(model *models.BTC) error {
+	query := `UPDATE bitcoin SET in_rub=:in_rub, btc_to_fiat=:btc_to_fiat WHERE latest = true`
 	_, err := r.driver.DB.NamedExec(query, model)
 	return err
 }
@@ -68,7 +75,7 @@ func (r *Repository) UpdateLastRecordForBTC() error {
 
 func (r *Repository) CreateFiatRecord(model *models.Fiat) error {
 	query := `
-	INSERT INTO fiat (currencies, latest, usdrub, created_at)
+	INSERT INTO fiat (currencies, latest, usd_rub, created_at)
 	VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
 	_, err := r.driver.DB.Exec(query, model.Currencies, model.Latest, model.USDRUB)
 	return err

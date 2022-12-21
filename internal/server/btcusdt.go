@@ -21,7 +21,7 @@ func (s *Server) LatestBTCUSDT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := lastBTCResponse{
-		Value:    model.Value,
+		Value:    model.InUSDT,
 		Datetime: model.CreatedAt,
 	}
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {
@@ -64,7 +64,7 @@ func (s *Server) BTCUSDTWithHistory(w http.ResponseWriter, r *http.Request) {
 	var history []BTCHistory
 	for _, m := range models {
 		history = append(history, BTCHistory{
-			Value:  m.Value,
+			Value:  m.InUSDT,
 			Date:   m.CreatedAt.Format(time.RFC3339[:19]),
 			Latest: m.Latest,
 		})

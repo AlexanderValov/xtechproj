@@ -221,6 +221,14 @@ func TestUpdateBTCInDB(t *testing.T) {
 			NumCode:  "1234",
 			Val:      70.551,
 		},
+		{
+			ID:       "2",
+			Name:     "test4",
+			Nominal:  1,
+			CharCode: "RUB",
+			NumCode:  "1234",
+			Val:      666.6 * 70.551,
+		},
 	}
 	expFiat := &models.Fiat{
 		ID:        1,
@@ -232,21 +240,29 @@ func TestUpdateBTCInDB(t *testing.T) {
 	require.NoError(t, err)
 	unixTime := int64(1671542754)
 	lastValue := "666.6"
-	btc := &models.BTC{
+	btc1 := &models.BTC{
 		ID:        0,
-		Value:     666.6,
+		InUSDT:    666.6,
 		Latest:    true,
 		CreatedAt: unixTimeToTime(unixTime),
 	}
-	btcToFiat, err := calculateBTCToFiat(cur, btc.Value, cur[1].Val)
-	require.NoError(t, err)
-	btc.BTCToFiat, err = json.Marshal(btcToFiat)
-	require.NoError(t, err)
 	repo.EXPECT().UpdateLastRecordForBTC().Return(nil).Times(1)
+	repo.EXPECT().CreateBTCRecord(btc1).Return(nil).Times(1)
+	btc2 := &models.BTC{
+		ID:        0,
+		InUSDT:    666.6,
+		InRub:     cur[1].Val * 666.6,
+		Latest:    true,
+		CreatedAt: unixTimeToTime(unixTime),
+	}
+	btcToFiat, err := calculateBTCToFiat(cur, btc2.InRub)
+	require.NoError(t, err)
+	btc2.BTCToFiat, err = json.Marshal(btcToFiat)
+	require.NoError(t, err)
 	repo.EXPECT().GetLastFiat().Return(expFiat, nil).Times(1)
-	repo.EXPECT().CreateBTCRecord(btc).Return(nil).Times(1)
+	repo.EXPECT().UpdateFiatForLastBTC(btc2).Return(nil).Times(1)
 	srv := NewManagementService(repo, cfg)
-	err = srv.UpdateBTCInDB(unixTime, lastValue)
+	srv.UpdateBTCInDB(unixTime, lastValue)
 	require.NoError(t, err)
 }
 
@@ -473,4 +489,32 @@ func TestGetLastBTCError(t *testing.T) {
 	btc, err := srv.GetLastBTC()
 	require.ErrorIs(t, err, expErr)
 	require.Equal(t, expOutput, btc)
+}
+
+func TestCheckLastDateUpdatingFiatCurrencies(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	tm, err := time.Parse(time.RFC3339[:10], "2022-12-21")
+	require.NoError(t, err)
+	repo.EXPECT().GetLastDateForFiat().Return(&tm, nil).Times(1)
+	err = srv.CheckLastDateUpdatingFiatCurrencies()
+	require.NoError(t, err)
+}
+
+func TestCheckLastDateUpdatingFiatCurrenciesError(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	tm, err := time.Parse(time.RFC3339[:10], time.Now().String()[:10])
+	require.NoError(t, err)
+	repo.EXPECT().GetLastDateForFiat().Return(&tm, nil).Times(1)
+	err = srv.CheckLastDateUpdatingFiatCurrencies()
+	require.ErrorIs(t, err, ErrAlreadyUpdatedFiatToday)
 }
