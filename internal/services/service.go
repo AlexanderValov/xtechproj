@@ -19,7 +19,7 @@ import (
 var (
 	ErrUSDNotFound             = errors.New("USD not found")
 	ErrEmptyValuteSlice        = errors.New("empty valutes slice")
-	ErrUnexpectedType          = errors.New("unexpected type for order_by")
+	ErrUnexpectedOrderBy       = errors.New("unexpected order_by")
 	ErrAlreadyUpdatedFiatToday = errors.New("fiat currencies were already updated today")
 )
 
@@ -144,7 +144,7 @@ func serializeOrderBy(orderBy string) (string, error) {
 		case "-value", "-created_at", "-latest":
 			orderBy = "ORDER BY " + orderBy[1:] + " DESC"
 		default:
-			return "", ErrUnexpectedType
+			return "", ErrUnexpectedOrderBy
 		}
 	}
 	return orderBy, nil

@@ -61,7 +61,7 @@ func (r *Repository) CreateBTCRecord(model *models.BTC) error {
 }
 
 func (r *Repository) UpdateLastRecordForBTC() error {
-	query := `UPDATE bitcoin SET latest = false  WHERE latest = true`
+	query := `UPDATE bitcoin SET latest = false WHERE latest = true`
 	_, err := r.driver.DB.Exec(query)
 	return err
 }

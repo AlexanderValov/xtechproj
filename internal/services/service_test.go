@@ -5,6 +5,7 @@ import (
 	"XTechProject/internal/models"
 	mock_repository "XTechProject/internal/repository/mocks"
 	"encoding/json"
+	"errors"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"strconv"
@@ -201,9 +202,7 @@ func TestUpdateBTCInDB(t *testing.T) {
 	defer ctl.Finish()
 	repo := mock_repository.NewMockRepositorier(ctl)
 	cfg, err := config.New()
-	if err != nil {
-		require.NoError(t, err)
-	}
+	require.NoError(t, err)
 	tm := time.Now()
 	cur := []models.Currency{
 		{
@@ -230,9 +229,7 @@ func TestUpdateBTCInDB(t *testing.T) {
 		USDRUB:    cur[1].Val,
 	}
 	expFiat.Currencies, err = json.Marshal(cur)
-	if err != nil {
-		require.NoError(t, err)
-	}
+	require.NoError(t, err)
 	unixTime := int64(1671542754)
 	lastValue := "666.6"
 	btc := &models.BTC{
@@ -242,17 +239,238 @@ func TestUpdateBTCInDB(t *testing.T) {
 		CreatedAt: unixTimeToTime(unixTime),
 	}
 	btcToFiat, err := calculateBTCToFiat(cur, btc.Value, cur[1].Val)
-	if err != nil {
-		require.NoError(t, err)
-	}
+	require.NoError(t, err)
 	btc.BTCToFiat, err = json.Marshal(btcToFiat)
-	if err != nil {
-		require.NoError(t, err)
-	}
+	require.NoError(t, err)
 	repo.EXPECT().UpdateLastRecordForBTC().Return(nil).Times(1)
 	repo.EXPECT().GetLastFiat().Return(expFiat, nil).Times(1)
 	repo.EXPECT().CreateBTCRecord(btc).Return(nil).Times(1)
 	srv := NewManagementService(repo, cfg)
 	err = srv.UpdateBTCInDB(unixTime, lastValue)
 	require.NoError(t, err)
+}
+
+func TestGetFiatHistory(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	type inoutStruct struct {
+		limit   int
+		offset  int
+		orderBy string
+	}
+	cases := []struct {
+		name   string
+		input  inoutStruct
+		expErr error
+	}{
+		{
+			name:   "test with ok data {limit: 0, offset: 0, orderBy: ''}",
+			input:  inoutStruct{limit: 0, offset: 0, orderBy: ""},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 1, offset: 1, orderBy: value}",
+			input:  inoutStruct{limit: 1, offset: 1, orderBy: "value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 10, offset: 10, orderBy: -value}",
+			input:  inoutStruct{limit: 10, offset: 10, orderBy: "-value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 1, offset: 0, orderBy: -value}",
+			input:  inoutStruct{limit: 1, offset: 0, orderBy: "-value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 0, offset: 1, orderBy: -value}",
+			input:  inoutStruct{limit: 0, offset: 1, orderBy: "-value"},
+			expErr: nil,
+		},
+	}
+	for _, c := range cases {
+		orderByAfterSerialize, err := serializeOrderBy(c.input.orderBy)
+		require.NoError(t, err)
+		repo.EXPECT().GetAllFiat(c.input.limit, c.input.offset, orderByAfterSerialize).Return([]models.Fiat{}, c.expErr).Times(1)
+		repo.EXPECT().GetAllBTC(c.input.limit, c.input.offset, orderByAfterSerialize).Return([]models.BTC{}, c.expErr).Times(1)
+		_, err = srv.GetFiatHistory(c.input.limit, c.input.offset, c.input.orderBy)
+		require.NoError(t, err)
+		_, err = srv.GetAllBTC(c.input.limit, c.input.offset, c.input.orderBy)
+		require.NoError(t, err)
+	}
+}
+
+func TestGetFiatHistoryError(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	orderBy := "wrong"
+	_, err = srv.GetFiatHistory(0, 0, orderBy)
+	require.ErrorIs(t, err, ErrUnexpectedOrderBy)
+
+	expOutput := ([]models.Fiat)(nil)
+	expErr := errors.New("db is off")
+	repo.EXPECT().GetAllFiat(0, 0, "").Return(expOutput, expErr).Times(1)
+	history, err := srv.GetFiatHistory(0, 0, "")
+	require.ErrorIs(t, err, expErr)
+	require.Equal(t, expOutput, history)
+}
+
+func TestGetAllBTC(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	type inoutStruct struct {
+		limit   int
+		offset  int
+		orderBy string
+	}
+	cases := []struct {
+		name   string
+		input  inoutStruct
+		expErr error
+	}{
+		{
+			name:   "test with ok data {limit: 0, offset: 0, orderBy: ''}",
+			input:  inoutStruct{limit: 0, offset: 0, orderBy: ""},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 1, offset: 1, orderBy: value}",
+			input:  inoutStruct{limit: 1, offset: 1, orderBy: "value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 10, offset: 10, orderBy: -value}",
+			input:  inoutStruct{limit: 10, offset: 10, orderBy: "-value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 1, offset: 0, orderBy: -value}",
+			input:  inoutStruct{limit: 1, offset: 0, orderBy: "-value"},
+			expErr: nil,
+		},
+		{
+			name:   "test with ok data {limit: 0, offset: 1, orderBy: -value}",
+			input:  inoutStruct{limit: 0, offset: 1, orderBy: "-value"},
+			expErr: nil,
+		},
+	}
+	for _, c := range cases {
+		orderByAfterSerialize, err := serializeOrderBy(c.input.orderBy)
+		require.NoError(t, err)
+		repo.EXPECT().GetAllBTC(c.input.limit, c.input.offset, orderByAfterSerialize).Return([]models.BTC{}, c.expErr).Times(1)
+		_, err = srv.GetAllBTC(c.input.limit, c.input.offset, c.input.orderBy)
+		require.NoError(t, err)
+	}
+}
+
+func TestGetAllBTCError(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	type inoutStruct struct {
+		limit                  int
+		offset                 int
+		orderBy                string
+		orderByAfterSerializer string
+	}
+	cases := []struct {
+		name      string
+		input     inoutStruct
+		expErr    error
+		expOutput []models.BTC
+	}{
+		{
+			name:      "test with wrong orderBy",
+			input:     inoutStruct{limit: 0, offset: 0, orderBy: "wrong", orderByAfterSerializer: ""},
+			expErr:    ErrUnexpectedOrderBy,
+			expOutput: nil,
+		},
+		{
+			name:      "test with bad request to db",
+			input:     inoutStruct{limit: 0, offset: 0, orderBy: "", orderByAfterSerializer: ""},
+			expErr:    errors.New("err: dial tcp: lookup db on 127.0.0.11:53: no such host"),
+			expOutput: nil,
+		},
+	}
+	for i, c := range cases {
+		if i != 0 {
+			repo.EXPECT().GetAllBTC(c.input.limit, c.input.offset, c.input.orderByAfterSerializer).Return(c.expOutput, c.expErr).Times(1)
+		}
+		_, err = srv.GetAllBTC(c.input.limit, c.input.offset, c.input.orderBy)
+		require.ErrorIs(t, err, c.expErr)
+	}
+}
+
+func TestGetLastFiat(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	expOutput := &models.Fiat{}
+	repo.EXPECT().GetLastFiat().Return(expOutput, nil).Times(1)
+	fiat, err := srv.GetLastFiat()
+	require.NoError(t, err)
+	require.Equal(t, expOutput, fiat)
+}
+
+func TestGetLastFiatError(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	expErr := errors.New("db is off")
+	expOutput := (*models.Fiat)(nil)
+	repo.EXPECT().GetLastFiat().Return(expOutput, expErr).Times(1)
+	fiat, err := srv.GetLastFiat()
+	require.ErrorIs(t, err, expErr)
+	require.Equal(t, expOutput, fiat)
+}
+
+func TestGetLastBTC(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	expOutput := &models.BTC{}
+	repo.EXPECT().GetLastBTC().Return(expOutput, nil).Times(1)
+	btc, err := srv.GetLastBTC()
+	require.NoError(t, err)
+	require.Equal(t, expOutput, btc)
+}
+
+func TestGetLastBTCError(t *testing.T) {
+	ctl := gomock.NewController(t)
+	defer ctl.Finish()
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	require.NoError(t, err)
+	srv := NewManagementService(repo, cfg)
+	expErr := errors.New("db is off")
+	expOutput := (*models.BTC)(nil)
+	repo.EXPECT().GetLastBTC().Return(expOutput, expErr).Times(1)
+	btc, err := srv.GetLastBTC()
+	require.ErrorIs(t, err, expErr)
+	require.Equal(t, expOutput, btc)
 }
