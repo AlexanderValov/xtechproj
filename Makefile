@@ -17,3 +17,9 @@ gen-repo:
 gen-serv:
 	mockgen -source=internal/services/service.go \
 	-destination=internal/services/mocks/mock_service.go
+
+.PHONY: cover
+cover:
+	go test -short -count=1 -race -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out
+	rm coverage.out

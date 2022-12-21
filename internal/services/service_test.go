@@ -1,13 +1,15 @@
 package services
 
 import (
+	"XTechProject/cmd/config"
 	"XTechProject/internal/models"
-	mockServices "XTechProject/internal/services/mocks"
+	mock_repository "XTechProject/internal/repository/mocks"
 	"encoding/json"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestGetResponse(t *testing.T) {
@@ -17,8 +19,11 @@ func TestGetResponse(t *testing.T) {
 }
 
 func TestGetResponseError(t *testing.T) {
-	link := "https:/link.csa"
+	link := "https://github.com/AlexanderValov12344"
 	_, err := getResponse(link)
+	require.Error(t, err)
+	link = "https://13.com/2"
+	_, err = getResponse(link)
 	require.Error(t, err)
 }
 
@@ -194,10 +199,60 @@ func TestSerializeOrderByError(t *testing.T) {
 func TestUpdateBTCInDB(t *testing.T) {
 	ctl := gomock.NewController(t)
 	defer ctl.Finish()
-	srv := mockServices.NewMockServicer(ctl)
+	repo := mock_repository.NewMockRepositorier(ctl)
+	cfg, err := config.New()
+	if err != nil {
+		require.NoError(t, err)
+	}
+	tm := time.Now()
+	cur := []models.Currency{
+		{
+			ID:       "1",
+			Name:     "test",
+			Nominal:  1,
+			CharCode: "test",
+			NumCode:  "123",
+			Val:      80.551,
+		},
+		{
+			ID:       "2",
+			Name:     "test1",
+			Nominal:  1,
+			CharCode: "USD",
+			NumCode:  "1234",
+			Val:      70.551,
+		},
+	}
+	expFiat := &models.Fiat{
+		ID:        1,
+		Latest:    true,
+		CreatedAt: &tm,
+		USDRUB:    cur[1].Val,
+	}
+	expFiat.Currencies, err = json.Marshal(cur)
+	if err != nil {
+		require.NoError(t, err)
+	}
 	unixTime := int64(1671542754)
 	lastValue := "666.6"
-	srv.EXPECT().UpdateBTCInDB(unixTime, lastValue)
-	err := srv.UpdateBTCInDB(unixTime, lastValue)
+	btc := &models.BTC{
+		ID:        0,
+		Value:     666.6,
+		Latest:    true,
+		CreatedAt: unixTimeToTime(unixTime),
+	}
+	btcToFiat, err := calculateBTCToFiat(cur, btc.Value, cur[1].Val)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	btc.BTCToFiat, err = json.Marshal(btcToFiat)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	repo.EXPECT().UpdateLastRecordForBTC().Return(nil).Times(1)
+	repo.EXPECT().GetLastFiat().Return(expFiat, nil).Times(1)
+	repo.EXPECT().CreateBTCRecord(btc).Return(nil).Times(1)
+	srv := NewManagementService(repo, cfg)
+	err = srv.UpdateBTCInDB(unixTime, lastValue)
 	require.NoError(t, err)
 }

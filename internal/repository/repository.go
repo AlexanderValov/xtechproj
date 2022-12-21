@@ -47,15 +47,15 @@ func (r *Repository) CreateTablesIfTheyNotExist() {
 		value             decimal(12, 1)           not null,
 		created_at 		  timestamp with time zone not null,
 		latest            boolean                  not null,
-		currencies_to_btc jsonb                    not null
+		btc_to_fiat       jsonb                    not null
 	);`)
 
 }
 
 func (r *Repository) CreateBTCRecord(model *models.BTC) error {
 	query := `
-	INSERT INTO bitcoin (value, created_at, latest, currencies_to_btc) 
-	VALUES (:value, :created_at, :latest, :currencies_to_btc)`
+	INSERT INTO bitcoin (value, created_at, latest, btc_to_fiat) 
+	VALUES (:value, :created_at, :latest, :btc_to_fiat)`
 	_, err := r.driver.DB.NamedExec(query, model)
 	return err
 }

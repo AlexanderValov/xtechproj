@@ -24,6 +24,8 @@ func main() {
 	repo := repository.New(db)
 	// init services and start workers
 	service := services.NewManagementService(repo, cfg)
+	// run workers
+	go service.RunWorkers()
 	//init server
 	srv := server.NewServer(cfg.PORT, service)
 	if err != nil {
